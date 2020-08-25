@@ -1,48 +1,25 @@
-/*eslint-disable*/
+/**
+ *
+ * @format
+ */
 const HtmlWebpackPlugin = require('html-webpack-plugin');
-const config = require('./config');
-// 终端输出进度条
-const WebpackBar = require('webpackbar');
 // 显示编译时间
 const ProgressBarPlugin = require('progress-bar-webpack-plugin');
 const chalk = require('chalk');
 const path = require('path');
 const webpack = require('webpack');
 const AntdDayjsWebpackPlugin = require('antd-dayjs-webpack-plugin');
-const HtmlWebpackTagsPlugin = require('html-webpack-tags-plugin');
-const os = require('os');
-const SpeedMeasurePlugin = require('speed-measure-webpack-plugin');
-const smp = new SpeedMeasurePlugin();
-const HardSourceWebpackPlugin = require('hard-source-webpack-plugin');
-// SpeedMeasurePlugin有冲突目前不能一起用
+// const HtmlWebpackTagsPlugin = require('html-webpack-tags-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
-const postcssPresetEnv = require('postcss-preset-env');
 const BundleAnalyzerPlugin = require('webpack-bundle-analyzer')
     .BundleAnalyzerPlugin;
-const threadLoader = require('thread-loader');
+// SpeedMeasurePlugin有冲突目前不能一起用
+const SpeedMeasurePlugin = require('speed-measure-webpack-plugin');
+
+const smp = new SpeedMeasurePlugin();
 // 判断环境
 const isDev = process.env.NODE_ENV === 'development';
-
-const cssWorkerPool = {
-    // 一个 worker 进程中并行执行工作的数量
-    // 默认为 20
-    workerParallelJobs: 20,
-    poolTimeout: 2000
-};
-
-const jsWorkerPool = {
-    // options
-    // 产生的 worker 的数量，默认是 (cpu 核心数 - 1)
-    // 当 require('os').cpus() 是 undefined 时，则为 1
-    workers: 2,
-    // 闲置时定时删除 worker 进程
-    // 默认为 500ms
-    // 可以设置为无穷大， 这样在监视模式(--watch)下可以保持 worker 持续存在
-    poolTimeout: 2000
-};
-
-threadLoader.warmup(cssWorkerPool, ['css-loader', 'postcss-loader']);
-threadLoader.warmup(jsWorkerPool, ['babel-loader', 'eslint-loader']);
+const config = require('./config');
 
 const cssReg = /\.css$/;
 const cssModuleReg = /\.module\.css$/;
@@ -61,6 +38,8 @@ const styleLoader = (options = {}) => {
           }
         : {
               loader: MiniCssExtractPlugin.loader,
+              // 如果提取到单独文件夹下，记得配置一下publicPath，为了正确的照片css中使用的图片资源
+              // 个人习惯将css文件放在单独目录下
               options: {
                   publicPath: '../../'
               }
@@ -68,25 +47,28 @@ const styleLoader = (options = {}) => {
 
     return [
         styleInner,
-        {
-            loader: 'thread-loader'
-        },
+        // antd的less主题更改用cache-loader总有问题
+        // 'cache-loader',
         {
             loader: 'css-loader',
             options
         },
         {
-            loader: 'postcss-loader',
-            options: {
-                ident: 'postcss',
-                plugins: () => [postcssPresetEnv({})]
-            }
+            loader: 'postcss-loader'
         }
     ].filter(Boolean);
 };
 
 const sassLoader = () => {
-    return ['sass-loader'].filter(Boolean);
+    return [
+        'sass-loader',
+        {
+            loader: 'sass-resources-loader',
+            options: {
+                resources: `${config.appSrc}/common/styles/variable.scss`
+            }
+        }
+    ].filter(Boolean);
 };
 
 const lessLoader = (options = {}) => {
@@ -94,16 +76,31 @@ const lessLoader = (options = {}) => {
         {
             loader: 'less-loader',
             options
+        },
+        {
+            loader: 'sass-resources-loader',
+            options: {
+                resources: `${config.appSrc}/common/styles/variable.less`
+            }
         }
     ].filter(Boolean);
 };
 
 const commonConfig = {
+    entry: {
+        app: config.appIndexJs
+    },
+
     performance: {
         hints: false
     },
 
     // externals: [
+    // lodash : {
+    //     commonjs: 'lodash',
+    //     amd: 'lodash',
+    //     root: '_' // 指向全局变量
+    //   },
     //     function(context, request, callback) {
     //         if (/^js$/.test(request)) {
     //             return callback(null, 'commonjs ' + request);
@@ -114,59 +111,27 @@ const commonConfig = {
 
     plugins: [
         new webpack.optimize.RuntimeChunkPlugin({
-            name: 'runtime'
+            name: entrypoint => `runtime-${entrypoint.name}`
         }),
 
         new webpack.optimize.SplitChunksPlugin({
             chunks: 'all',
             minSize: 30000,
-            maxAsyncRequests: 5,
-            maxInitialRequests: 10,
-            name: true,
-            automaticNameDelimiter: '~',
+            minChunks: 1,
+            maxAsyncRequests: 3,
+            maxInitialRequests: 3,
             cacheGroups: {
-                views: {
-                    test: module =>
-                        /ant/.test(module.context) ||
-                        /rc-/.test(module.context) ||
-                        /react-router-breadcrumbs-hoc/.test(module.context) ||
-                        /echarts/.test(module.context),
-                    name: 'views',
-                    priority: 10,
-                    reuseExistingChunk: true
-                },
-
-                reactVendor: {
-                    name: 'reactVendor',
-                    priority: 10,
-                    test: module =>
-                        /react/.test(module.context) ||
-                        /redux/.test(module.context) ||
-                        /react-dom/.test(module.context) ||
-                        /react-redux/.test(module.context) ||
-                        /react-thunk/.test(module.context),
-                    reuseExistingChunk: true
-                },
-
-                utils: {
-                    name: 'utils',
-                    priority: 10,
-                    test: module =>
-                        /axios/.test(module.context) ||
-                        /classnames/.test(module.context) ||
-                        /prop-types/.test(module.context),
-                    reuseExistingChunk: true
-                },
-
-                vendor: {
-                    priority: -10,
+                vendors: {
+                    name: 'chunk-vendors',
                     test: /[\\/]node_modules[\\/]/,
-                    name: 'vendor'
+                    priority: -10,
+                    chunks: 'initial'
                 },
-
-                default: {
+                common: {
+                    name: 'chunk-common',
                     minChunks: 2,
                     priority: -20,
+                    chunks: 'initial',
                     reuseExistingChunk: true
                 }
             }
@@ -174,38 +139,8 @@ const commonConfig = {
 
         // 用Day.js替换moment
         new AntdDayjsWebpackPlugin(),
-
-        // new BundleAnalyzerPlugin({
-        //     // concatenateModules: false,
-        //     //  可以是`server`，`static`或`disabled`。
-        //     //  在`server`模式下，分析器将启动HTTP服务器来显示软件包报告。
-        //     //  在“静态”模式下，会生成带有报告的单个HTML文件。
-        //     //  在`disabled`模式下，你可以使用这个插件来将`generateStatsFile`设置为`true`来生成Webpack Stats JSON文件。
-        //     analyzerMode: 'server',
-        //     //  将在“服务器”模式下使用的主机启动HTTP服务器。
-        //     analyzerHost: '127.0.0.1',
-        //     //  将在“服务器”模式下使用的端口启动HTTP服务器。
-        //     analyzerPort: 9119,
-        //     //  路径捆绑，将在`static`模式下生成的报告文件。
-        //     //  相对于捆绑输出目录。
-        //     // reportFilename: 'report.html',
-        //     //  模块大小默认显示在报告中。
-        //     //  应该是`stat`，`parsed`或者`gzip`中的一个。
-        //     //  有关更多信息，请参见“定义”一节。
-        //     defaultSizes: 'parsed',
-        //     //  在默认浏览器中自动打开报告
-        //     openAnalyzer: true,
-        //     //  如果为true，则Webpack Stats JSON文件将在bundle输出目录中生成
-        //     generateStatsFile: false,
-        //     //  如果`generateStatsFile`为`true`，将会生成Webpack Stats JSON文件的名字。
-        //     //  相对于捆绑输出目录。
-        //     statsFilename: 'stats.json',
-        //     //  stats.toJson（）方法的选项。
-        //     //  例如，您可以使用`source：false`选项排除统计文件中模块的来源。
-        //     //  在这里查看更多选项：https：//github.com/webpack/webpack/blob/webpack-1/lib/Stats.js#L21
-        //     statsOptions: null,
-        //     logLevel: 'info' //日志级别。可以是'信息'，'警告'，'错误'或'沉默'。
-        // }),
+        // 只加载 `moment/locale/ja.js` 和 `moment/locale/it.js` 优化moment体积
+        // new webpack.ContextReplacementPlugin(/moment[/\\]locale$/, /ja|it/),
 
         new HtmlWebpackPlugin({
             title: '',
@@ -215,10 +150,9 @@ const commonConfig = {
             inject: true,
             minify: {
                 removeComments: true,
-                collapseWhitespace: true,
-                removeAttributeQuotes: true
-            },
-            chunksSortMode: 'dependency'
+                collapseWhitespace: true, // 折叠空行
+                removeAttributeQuotes: true // 删除双引号
+            }
         }),
 
         new webpack.DefinePlugin({
@@ -227,93 +161,68 @@ const commonConfig = {
             }
         }),
 
-        // 进度条
-        new WebpackBar(),
-
         // 显示打包时间
         new ProgressBarPlugin({
-            format:
-                '  build [:bar] ' +
-                chalk.green.bold(':percent') +
-                ' (:elapsed seconds)'
-        })
+            format: `${chalk.green('Progressing')} [:bar] ${chalk.green.bold(
+                ':percent'
+            )} (:elapsed seconds)`
+        }),
 
+        process.env.Analyzer && // 分析包的大小的
+            new BundleAnalyzerPlugin({
+                // concatenateModules: false,
+                //  可以是`server`，`static`或`disabled`。
+                //  在`server`模式下，分析器将启动HTTP服务器来显示软件包报告。
+                //  在“静态”模式下，会生成带有报告的单个HTML文件。
+                //  在`disabled`模式下，你可以使用这个插件来将`generateStatsFile`设置为`true`来生成Webpack Stats JSON文件。
+                analyzerMode: 'server',
+                //  将在“服务器”模式下使用的主机启动HTTP服务器。
+                analyzerHost: '127.0.0.1',
+                //  将在“服务器”模式下使用的端口启动HTTP服务器。
+                analyzerPort: 1331,
+                //  路径捆绑，将在`static`模式下生成的报告文件。
+                //  相对于捆绑输出目录。
+                // reportFilename: 'report.html',
+                //  模块大小默认显示在报告中。
+                //  应该是`stat`，`parsed`或者`gzip`中的一个。
+                //  有关更多信息，请参见“定义”一节。
+                defaultSizes: 'parsed',
+                //  在默认浏览器中自动打开报告
+                openAnalyzer: true,
+                //  如果为true，则Webpack Stats JSON文件将在bundle输出目录中生成
+                generateStatsFile: false,
+                //  如果`generateStatsFile`为`true`，将会生成Webpack Stats JSON文件的名字。
+                //  相对于捆绑输出目录。
+                statsFilename: 'stats.json',
+                //  stats.toJson（）方法的选项。
+                //  例如，您可以使用`source：false`选项排除统计文件中模块的来源。
+                //  在这里查看更多选项：https：//github.com/webpack/webpack/blob/webpack-1/lib/Stats.js#L21
+                statsOptions: null,
+                logLevel: 'info' // 日志级别。可以是'信息'，'警告'，'错误'或'沉默'。
+            })
         // new HtmlWebpackTagsPlugin({
         //     tags: [
         //         isDev ? './public/js/baiduMap.js' : 'public/js/baiduMap.js',
-        //         isDev ? './public/js/LuShu.js' : 'public/js/LuShu.js',
-        //         isDev ? './public/js/Heatmap.js' : 'public/js/Heatmap.js',
-
         //         {
         //             path:
         //                 'http://api.map.baidu.com/api?v=3.0&ak=moMIflSL2yGiq3VwQ3bynEKE7gl2cjQw',
         //             type: 'js'
         //         },
-        //         {
-        //             path:
-        //                 'http://api.map.baidu.com/library/LuShu/1.2/src/LuShu_min.js',
-        //             type: 'js'
-        //         },
-        //         {
-        //             path:
-        //                 'http://api.map.baidu.com/library/Heatmap/2.0/src/Heatmap_min.js',
-        //             type: 'js'
-        //         }
         //     ],
         //     append: false
         // })
-
-        // new HardSourceWebpackPlugin({
-        //     // configHash在启动webpack实例时转换webpack配置，并用于cacheDirectory为不同的webpack配置构建不同的缓存
-        //     configHash: function(webpackConfig) {
-        //         return require('node-object-hash')({ sort: false }).hash(
-        //             webpackConfig
-        //         );
-        //     },
-
-        //     info: {
-        //         // 'none' or 'test'.
-        //         mode: 'none',
-        //         // 'debug', 'log', 'info', 'warn', or 'error'.
-        //         level: 'debug'
-        //     },
-        //     cachePrune: {
-        //         // Caches younger than `maxAge` are not considered for deletion. They must
-        //         // be at least this (default: 2 days) old in milliseconds.
-        //         maxAge: 2 * 24 * 60 * 60 * 1000,
-        //         // All caches together must be larger than `sizeThreshold` before any
-        //         // caches will be deleted. Together they must be at least this
-        //         // (default: 50 MB) big in bytes.
-        //         sizeThreshold: 50 * 1024 * 1024
-        //     },
-
-        //     cacheDirectory: 'node_modules/.cache/hard-source/[confighash]',
-
-        //     // 当加载器，插件，其他构建时脚本或其他动态依赖项发生更改时，hard-source需要替换缓存以确保输出正确。environmentHash被用来确定这一点。如果散列与先前的构建不同，则将使用新的缓存
-        //     environmentHash: {
-        //         root: process.cwd(),
-        //         directories: [],
-        //         files: ['package-lock.json', 'yarn.lock']
-        //     }
-        // })
-    ],
+    ].filter(Boolean),
 
     resolve: {
         // 目录开头为 @ 符号，文件开头为 $ 符号
         alias: {
-            '@commenApi': path.resolve(config.appSrc, 'public/data-commen/api'),
-            '@commenModel': path.resolve(
-                config.appSrc,
-                'public/data-commen/model'
-            ),
             '@useHooks': path.resolve(config.appSrc, 'useHooks'),
-            '@reducers': path.resolve(config.appSrc, 'redux/reducers'),
-            '@actions': path.resolve(config.appSrc, 'redux/actions'),
-            '@useRedux': path.resolve(config.appSrc, 'redux'),
+            '@redux': path.resolve(config.appSrc, 'redux'),
             '@layout': path.resolve(config.appSrc, 'layout'),
             '@router': path.resolve(config.appSrc, 'router'),
             '@pages': path.resolve(config.appSrc, 'pages'),
-            '@public': path.resolve(config.appSrc, 'public'),
+            '@common': path.resolve(config.appSrc, 'common'),
+            '@src': path.resolve(config.appSrc),
             '@components': path.resolve(config.appSrc, 'components'),
             '@utils': path.resolve(config.appSrc, 'utils'),
             $utils: path.resolve(config.appSrc, 'utils/utils'),
@@ -324,18 +233,13 @@ const commonConfig = {
     module: {
         rules: [
             {
-                enforce: 'pre',
+                enforce: 'pre', // 强制去前面执行 因为loader是从下向上 从右向左执行的
                 test: /\.js?$/,
                 use: [
                     {
-                        loader: 'thread-loader',
-                        options: jsWorkerPool
-                    },
-                    {
                         loader: 'eslint-loader',
                         options: {
-                            failOnError: false,
-                            failOnWarning: true, //警告不显示
+                            emitWarning: isDev, // 是否所有的error都当做warning。如果需要可以打开，在测试环境把所有 Error 都当做 Warn，这样避免了修改 ESLint 规则
                             quiet: true,
                             cache: true,
                             fix: false // 是否自动修复
@@ -348,9 +252,9 @@ const commonConfig = {
             {
                 test: /\.js?$/,
                 use: [
+                    'cache-loader',
                     {
-                        loader: 'thread-loader',
-                        options: jsWorkerPool
+                        loader: 'thread-loader'
                     },
                     {
                         loader: 'babel-loader',
@@ -381,9 +285,32 @@ const commonConfig = {
                 test: /\.(png|jpg|jpeg|gif|svg)$/,
                 use: [
                     {
+                        loader: 'image-webpack-loader',
+                        options: {
+                            mozjpeg: {
+                                progressive: true,
+                                quality: 65
+                            },
+                            optipng: {
+                                enabled: true
+                            },
+                            pngquant: {
+                                quality: [0.65, 0.9],
+                                speed: 4
+                            },
+                            gifsicle: {
+                                interlaced: false
+                            },
+                            webp: {
+                                quality: 75
+                            }
+                        }
+                    },
+                    {
                         loader: 'url-loader',
                         options: {
-                            limit: 15000,
+                            esModule: false,
+                            limit: 0,
                             name: 'app/images/[name]_[hash:7].[ext]'
                         }
                     }
@@ -395,7 +322,7 @@ const commonConfig = {
                     {
                         loader: 'file-loader',
                         options: {
-                            limit: 15000,
+                            esModule: false,
                             name: 'app/files/[name]_[hash:7].[ext]'
                         }
                     }
@@ -407,6 +334,7 @@ const commonConfig = {
                     loader: 'file-loader',
                     options: {
                         limit: 15000,
+                        esModule: false,
                         name: 'app/fonts/[name]_[hash:7].[ext]'
                     }
                 }
@@ -415,11 +343,12 @@ const commonConfig = {
             {
                 oneOf: [
                     {
+                        // sassmodule
                         test: sassModuleReg,
                         use: [
                             ...styleLoader({
                                 modules: {
-                                    localIdentName: 'local]--[hash:base64:5]'
+                                    localIdentName: '[local]--[hash:base64:5]'
                                 }
                             }),
                             ...sassLoader()
@@ -427,6 +356,7 @@ const commonConfig = {
                         include: config.appSrc
                     },
                     {
+                        // lessmodule
                         test: lessModuleReg,
                         use: [
                             ...styleLoader({
@@ -435,27 +365,34 @@ const commonConfig = {
                                 }
                             }),
                             ...lessLoader({
-                                javascriptEnabled: true
+                                lessOptions: {
+                                    javascriptEnabled: true
+                                }
                             })
                         ],
                         include: config.appSrc
                     },
                     {
+                        // sass
                         test: sassReg,
                         use: [...styleLoader(), ...sassLoader()],
                         include: config.appSrc
                     },
                     {
+                        // less
                         test: lessReg,
                         use: [
                             ...styleLoader(),
                             ...lessLoader({
-                                javascriptEnabled: true
+                                lessOptions: {
+                                    javascriptEnabled: true
+                                }
                             })
                         ],
                         include: config.appSrc
                     },
                     {
+                        // cssmodule
                         test: cssModuleReg,
                         use: [
                             ...styleLoader({
@@ -467,17 +404,22 @@ const commonConfig = {
                         include: config.appSrc
                     },
                     {
+                        // css
                         test: cssReg,
                         use: [...styleLoader()],
                         include: config.appSrc
                     },
                     {
+                        // antd等第三方less
                         test: lessReg,
                         use: [
                             ...styleLoader(),
                             ...lessLoader({
-                                // 使用less默认运行时替换配置的@color样式
-                                javascriptEnabled: true
+                                lessOptions: {
+                                    // 使用less默认运行时替换配置的@color样式
+                                    modifyVars: config.styles,
+                                    javascriptEnabled: true
+                                }
                             })
                         ],
                         include: /node_modules/
@@ -485,6 +427,37 @@ const commonConfig = {
                 ]
             }
         ]
+    },
+
+    stats: {
+        // 添加缓存（但未构建）模块的信息
+        cached: false,
+        // 显示缓存的资源（将其设置为 `false` 则仅显示输出的文件）
+        cachedAssets: false,
+        // 添加 children 信息
+        children: false,
+        // 添加 chunk 信息（设置为 `false` 能允许较少的冗长输出）
+        chunks: false,
+        // 将构建模块信息添加到 chunk 信息
+        chunkModules: false,
+        // `webpack --colors` 等同于
+        colors: true,
+        // 添加 --env information
+        env: false,
+        // 添加错误信息
+        errors: true,
+        // 添加错误的详细信息（就像解析日志一样）
+        errorDetails: true,
+        // 添加 compilation 的哈希值
+        hash: false,
+        // 添加构建模块信息
+        modules: false,
+        // 当文件大小超过 `performance.maxAssetSize` 时显示性能提示
+        performance: false,
+        // 添加时间信息
+        timings: true,
+        // 添加警告
+        warnings: true
     }
 };
 

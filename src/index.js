@@ -1,11 +1,13 @@
+/** @format */
+
 import React from 'react';
 import ReactDOM from 'react-dom';
-import store from '@useRedux/store';
+import store from '@redux/store';
 import { Provider } from 'react-redux';
-import Root from './router/router';
 import { ConfigProvider } from 'antd';
 import { HashRouter as Router } from 'react-router-dom';
 import zh_CN from 'antd/lib/locale-provider/zh_CN';
+import Root from './router/router';
 
 class App extends React.Component {
     render() {

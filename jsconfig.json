@@ -10,7 +10,7 @@
             "@reducers/*": ["src/redux/reducers/*"],
             "@actions/*": ["src/redux/actions/*"],
             "@useHooks/*": ["src/useHooks/*"],
-            "@useRedux/*": ["src/redux/*"],
+            "@redux/*": ["src/redux/*"],
             "@layout/*": ["src/layout/*"],
             "@router/*": ["src/router/*"],
             "@pages/*": ["src/pages/*"],

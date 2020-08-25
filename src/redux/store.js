@@ -1,13 +1,16 @@
+/** @format */
+
 import { applyMiddleware, createStore } from 'redux';
-import combineReducers from '@useRedux/reducer.js';
+import combineReducers from '@redux/reducer.js';
 import thunk from 'redux-thunk';
 
 const middleware = [thunk];
-let store = createStore(combineReducers, applyMiddleware(...middleware));
+const store = createStore(combineReducers, applyMiddleware(...middleware));
 
 if (process.env.NODE_ENV !== 'production' && module.hot) {
-    module.hot.accept('@useRedux/reducer.js', () => {
-        const nextCombineReducers = require('@useRedux/reducer.js').default;
+    module.hot.accept('@redux/reducer.js', () => {
+        // eslint-disable-next-line global-require
+        const nextCombineReducers = require('@redux/reducer.js').default;
         store.replaceReducer(nextCombineReducers);
     });
 }
