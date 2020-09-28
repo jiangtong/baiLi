@@ -81,7 +81,7 @@ export default ({
         if (state.sorter) {
             params.sorter = state.sorter;
         }
-        requestAction(params).then(res => {
+        requestAction(params).then((res) => {
             const payload = { data: [], totals: 0 };
             if (res.success) {
                 if (needPage) {
@@ -101,14 +101,14 @@ export default ({
                 payload
             });
         });
-    }, [state.current, state.count]);
+    }, [state.count]);
 
     // 依赖变化的事件
     useEffect(() => {
         if (requestRef.current) {
             run();
         }
-    }, [state.current, state.pageSize, state.count, ...deps]);
+    }, [state.pageSize, state.count, ...deps]);
 
     // 分页
     const onChange = useCallback(
@@ -147,7 +147,7 @@ export default ({
 
     // 主动搜索
     const searchSubmit = useCallback(
-        async params => {
+        async (params) => {
             // 主要是为了让dispactch或setstate可以实现异步就是可以一个一个更新数据
             await dispatch({
                 type: 'updateState',

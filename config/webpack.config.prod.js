@@ -27,10 +27,13 @@ const publicConfig = {
         // libraryTarget: 'umd' //打包文件加载方式
     },
 
-    // devtool: 'source-map',
+    devtool: 'none',
     mode: 'production',
 
     plugins: [
+        // // 只加载 `moment/locale/ja.js` 和 `moment/locale/it.js` 优化moment体积
+        // new webpack.IgnorePlugin(/^\.\/locale$/, /moment$/),
+
         new TerserPlugin({
             cache: true,
             extractComments: false,

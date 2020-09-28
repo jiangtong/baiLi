@@ -1,12 +1,13 @@
 /** @format */
 const merge = require('webpack-merge');
-const os = require('os');
-const portfinder = require('portfinder');
-const webpack = require('webpack');
 const chalk = require('chalk');
-const Mock = require('../src/mock/mockApi');
+const os = require('os');
+// const HtmlWebpackTagsPlugin = require('html-webpack-tags-plugin');
+const portfinder = require('portfinder');
 const config = require('./config');
 const commonConfig = require('./webpack.config.common.js');
+const ErrorOverlayPlugin = require('error-overlay-webpack-plugin');
+const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 
 // 需要转发的接口拼接
 const { proxyArr = [] } = config;
@@ -17,6 +18,11 @@ proxyArr.forEach(item => {
     newProxyObj[item.name] = {
         target: item.url,
         changeOrigin: true,
+        pathRewrite: {
+            ['^' + item.name]: item.pathRewrite
+                ? `^${item.name}`
+                : item.pathRewrite
+        },
         secure: false
     };
 });
@@ -31,7 +37,7 @@ const getLocalHostnameAndIp = () => {
 
 const devConfig = merge.smart(commonConfig, {
     // devtool: 'eval-source-map',
-    devtool: 'cheap-module-eval-source-map',
+    devtool: 'cheap-module-source-map',
     mode: 'development',
 
     output: {
@@ -41,13 +47,18 @@ const devConfig = merge.smart(commonConfig, {
         publicPath: '/'
     },
 
-    plugins: [new webpack.HotModuleReplacementPlugin({})],
+    plugins: [new ReactRefreshWebpackPlugin(), new ErrorOverlayPlugin()],
 
     devServer: {
         host: config.host,
         port: config.port,
         historyApiFallback: true,
+        // 错误覆盖到界面上
+        // overlay: true,
         compress: true,
+        // 阻止所有这些消息显示
+        clientLogLevel: 'none',
+        progress: false,
         hot: true,
         inline: true,
         quiet: false, // 启用 quiet 后，除了初始启动信息之外的任何内容都不会被打印到控制台。这也意味着来自 webpack 的错误或警告在控制台不可见。
@@ -56,16 +67,13 @@ const devConfig = merge.smart(commonConfig, {
         // contentBase: 'dist',
         disableHostCheck: true,
         proxy: newProxyObj,
-        before(app) {
-            if (process.env.IS_Mock) {
-                Mock(app);
-            }
+        // 允许被主应用跨域fetch请求到
+        headers: {
+            'Access-Control-Allow-Origin': '*'
         },
         stats: 'errors-only'
     }
 });
-
-// 自动寻找空余端口
 
 // 自动寻找空余端口
 module.exports = new Promise((resolve, reject) => {
@@ -78,7 +86,7 @@ module.exports = new Promise((resolve, reject) => {
             devConfig.plugins = [
                 ...devConfig.plugins,
                 // 显示那个小文字
-                function a() {
+                function() {
                     this.hooks.done.tap('done', stats => {
                         if (
                             stats.compilation.errors &&

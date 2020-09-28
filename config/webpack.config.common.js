@@ -6,20 +6,26 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 // 显示编译时间
 const ProgressBarPlugin = require('progress-bar-webpack-plugin');
 const chalk = require('chalk');
+const resolve = require('resolve');
+const fs = require('fs');
 const path = require('path');
 const webpack = require('webpack');
-const AntdDayjsWebpackPlugin = require('antd-dayjs-webpack-plugin');
+const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
+const ForkTsCheckerNotifierWebpackPlugin = require('fork-ts-checker-notifier-webpack-plugin');
 // const HtmlWebpackTagsPlugin = require('html-webpack-tags-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const BundleAnalyzerPlugin = require('webpack-bundle-analyzer')
     .BundleAnalyzerPlugin;
-// SpeedMeasurePlugin有冲突目前不能一起用
 const SpeedMeasurePlugin = require('speed-measure-webpack-plugin');
-
 const smp = new SpeedMeasurePlugin();
+const typescriptFormatter = require('./typescriptFormatter');
+
 // 判断环境
 const isDev = process.env.NODE_ENV === 'development';
 const config = require('./config');
+
+// 检查有没有ts文件
+const useTypeScript = fs.existsSync(config.tsConfig);
 
 const cssReg = /\.css$/;
 const cssModuleReg = /\.module\.css$/;
@@ -61,13 +67,13 @@ const styleLoader = (options = {}) => {
 
 const sassLoader = () => {
     return [
-        'sass-loader',
-        {
-            loader: 'sass-resources-loader',
-            options: {
-                resources: `${config.appSrc}/common/styles/variable.scss`
-            }
-        }
+        'sass-loader'
+        // {
+        //     loader: 'sass-resources-loader',
+        //     options: {
+        //         resources: `${config.appSrc}/common/assets/styles/variable.scss`
+        //     }
+        // }
     ].filter(Boolean);
 };
 
@@ -76,13 +82,13 @@ const lessLoader = (options = {}) => {
         {
             loader: 'less-loader',
             options
-        },
-        {
-            loader: 'sass-resources-loader',
-            options: {
-                resources: `${config.appSrc}/common/styles/variable.less`
-            }
         }
+        // {
+        //     loader: 'sass-resources-loader',
+        //     options: {
+        //         resources: `${config.appSrc}/common/assets/styles/variable.less`
+        //     }
+        // }
     ].filter(Boolean);
 };
 
@@ -95,21 +101,10 @@ const commonConfig = {
         hints: false
     },
 
-    // externals: [
-    // lodash : {
-    //     commonjs: 'lodash',
-    //     amd: 'lodash',
-    //     root: '_' // 指向全局变量
-    //   },
-    //     function(context, request, callback) {
-    //         if (/^js$/.test(request)) {
-    //             return callback(null, 'commonjs ' + request);
-    //         }
-    //         callback();
-    //     }
-    // ],
-
     plugins: [
+        // 只加载 `moment/locale/ja.js` 和 `moment/locale/it.js` 优化moment体积
+        new webpack.IgnorePlugin(/^\.\/locale$/, /moment$/),
+
         new webpack.optimize.RuntimeChunkPlugin({
             name: entrypoint => `runtime-${entrypoint.name}`
         }),
@@ -137,22 +132,27 @@ const commonConfig = {
             }
         }),
 
-        // 用Day.js替换moment
-        new AntdDayjsWebpackPlugin(),
-        // 只加载 `moment/locale/ja.js` 和 `moment/locale/it.js` 优化moment体积
-        // new webpack.ContextReplacementPlugin(/moment[/\\]locale$/, /ja|it/),
-
         new HtmlWebpackPlugin({
             title: '',
             filename: 'index.html',
             template: config.appHtml,
             favicon: config.favicon,
             inject: true,
+            // cache: true,
             minify: {
                 removeComments: true,
                 collapseWhitespace: true, // 折叠空行
-                removeAttributeQuotes: true // 删除双引号
-            }
+                removeAttributeQuotes: true, // 删除双引号
+                removeRedundantAttributes: true,
+                useShortDoctype: true,
+                removeEmptyAttributes: true,
+                removeStyleLinkTypeAttributes: true,
+                keepClosingSlash: true,
+                minifyJS: true,
+                minifyCSS: true,
+                minifyURLs: true
+            },
+            chunksSortMode: 'dependency'
         }),
 
         new webpack.DefinePlugin({
@@ -166,6 +166,28 @@ const commonConfig = {
             format: `${chalk.green('Progressing')} [:bar] ${chalk.green.bold(
                 ':percent'
             )} (:elapsed seconds)`
+        }),
+
+        useTypeScript &&
+            new ForkTsCheckerWebpackPlugin({
+                typescript: resolve.sync('typescript', {
+                    basedir: config.appNodeModules
+                }),
+                // 将async设为false，可以阻止Webpack的emit以等待类型检查器/linter，并向Webpack的编译添加错误。
+                async: isDev,
+                useTypescriptIncrementalApi: true,
+                checkSyntacticErrors: true,
+                // tsconfig: config.tsConfig,
+                formatter: typescriptFormatter
+            }),
+
+        // 将TypeScript类型检查错误以弹框提示
+        // 如果fork-ts-checker-webpack-plugin的async为false时可以不用
+        // 否则建议使用，以方便发现错误
+        new ForkTsCheckerNotifierWebpackPlugin({
+            title: 'TypeScript',
+            excludeWarnings: true,
+            skipSuccessful: true
         }),
 
         process.env.Analyzer && // 分析包的大小的
@@ -200,6 +222,7 @@ const commonConfig = {
                 statsOptions: null,
                 logLevel: 'info' // 日志级别。可以是'信息'，'警告'，'错误'或'沉默'。
             })
+
         // new HtmlWebpackTagsPlugin({
         //     tags: [
         //         isDev ? './public/js/baiduMap.js' : 'public/js/baiduMap.js',
@@ -214,9 +237,19 @@ const commonConfig = {
     ].filter(Boolean),
 
     resolve: {
+        extensions: ['tsx', 'ts', 'jsx', 'js', 'json']
+            .map(ext => `.${ext}`)
+            .filter(ext => useTypeScript || !ext.includes('ts')),
+
         // 目录开头为 @ 符号，文件开头为 $ 符号
+        // plugins: [
+        //     // 将 tsconfig.json 中的路径配置映射到 webpack 中
+        //     new TsconfigPathsPlugin({
+        //         configFile: './tsconfig.json'
+        //     })
+        // ]
         alias: {
-            '@useHooks': path.resolve(config.appSrc, 'useHooks'),
+            '@hooks': path.resolve(config.appSrc, 'hooks'),
             '@redux': path.resolve(config.appSrc, 'redux'),
             '@layout': path.resolve(config.appSrc, 'layout'),
             '@router': path.resolve(config.appSrc, 'router'),
@@ -225,7 +258,6 @@ const commonConfig = {
             '@src': path.resolve(config.appSrc),
             '@components': path.resolve(config.appSrc, 'components'),
             '@utils': path.resolve(config.appSrc, 'utils'),
-            $utils: path.resolve(config.appSrc, 'utils/utils'),
             'react-dom': '@hot-loader/react-dom'
         }
     },
@@ -234,12 +266,14 @@ const commonConfig = {
         rules: [
             {
                 enforce: 'pre', // 强制去前面执行 因为loader是从下向上 从右向左执行的
-                test: /\.js?$/,
+                test: /\.(js|ts)x?$/,
                 use: [
                     {
                         loader: 'eslint-loader',
                         options: {
-                            emitWarning: isDev, // 是否所有的error都当做warning。如果需要可以打开，在测试环境把所有 Error 都当做 Warn，这样避免了修改 ESLint 规则
+                            emitError: !isDev,
+                            emitWarning: !!isDev, // 是否所有的error都当做warning。如果需要可以打开，在测试环境把所有 Error 都当做 Warn，这样避免了修改 ESLint 规则
+                            failOnError: !isDev,
                             quiet: true,
                             cache: true,
                             fix: false // 是否自动修复
@@ -250,7 +284,7 @@ const commonConfig = {
                 include: config.appSrc
             },
             {
-                test: /\.js?$/,
+                test: /\.(js|ts)x?$/,
                 use: [
                     'cache-loader',
                     {
@@ -284,28 +318,28 @@ const commonConfig = {
             {
                 test: /\.(png|jpg|jpeg|gif|svg)$/,
                 use: [
-                    {
-                        loader: 'image-webpack-loader',
-                        options: {
-                            mozjpeg: {
-                                progressive: true,
-                                quality: 65
-                            },
-                            optipng: {
-                                enabled: true
-                            },
-                            pngquant: {
-                                quality: [0.65, 0.9],
-                                speed: 4
-                            },
-                            gifsicle: {
-                                interlaced: false
-                            },
-                            webp: {
-                                quality: 75
-                            }
-                        }
-                    },
+                    // {
+                    //     loader: 'image-webpack-loader',
+                    //     options: {
+                    //         mozjpeg: {
+                    //             progressive: true,
+                    //             quality: 65
+                    //         },
+                    //         optipng: {
+                    //             enabled: true
+                    //         },
+                    //         pngquant: {
+                    //             quality: [0.65, 0.9],
+                    //             speed: 4
+                    //         },
+                    //         gifsicle: {
+                    //             interlaced: false
+                    //         },
+                    //         webp: {
+                    //             quality: 75
+                    //         }
+                    //     }
+                    // },
                     {
                         loader: 'url-loader',
                         options: {
@@ -406,8 +440,8 @@ const commonConfig = {
                     {
                         // css
                         test: cssReg,
-                        use: [...styleLoader()],
-                        include: config.appSrc
+                        use: [...styleLoader()]
+                        // include: config.appSrc
                     },
                     {
                         // antd等第三方less
@@ -431,7 +465,7 @@ const commonConfig = {
 
     stats: {
         // 添加缓存（但未构建）模块的信息
-        cached: false,
+        cached: true,
         // 显示缓存的资源（将其设置为 `false` 则仅显示输出的文件）
         cachedAssets: false,
         // 添加 children 信息
@@ -455,9 +489,9 @@ const commonConfig = {
         // 当文件大小超过 `performance.maxAssetSize` 时显示性能提示
         performance: false,
         // 添加时间信息
-        timings: true,
+        timings: false,
         // 添加警告
-        warnings: true
+        warnings: false
     }
 };
 
